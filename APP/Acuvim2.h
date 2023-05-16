@@ -36,6 +36,7 @@ class ACUVIM_II
   private:
     bool AcuvimFault;
     acuvimBasicMeasurement20ms_t acuvim;
+    bool ConnectEthernet(void);
     void BasicRequest20ms(void);
     bool BasicRead20ms(void);
     bool CheckModbus(void);

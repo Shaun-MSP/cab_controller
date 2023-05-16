@@ -34,29 +34,75 @@
 
 typedef enum ACUVIM_FAULT
 {
-  ACU_FAULT_SHIELD_OK         = 0,
-  ACU_FAULT_NO_ETH_SHIELD     = 1,
-  ACU_FAULT_NO_ETH_CONNECTION = 2
+  ACU_FAULT_OK                = 0,
+  ACU_FAULT_NO_ETH_CONNECTION = 1
 }acuvimFault_t;
 
 typedef enum READ_STATE_ENUM
 {
-  ACUVIM_READ_IDLE               = 0,
-  ACUVIM_READ_IN_PROGRESS        = 1
+  ACUVIM_INIT               = 0,
+  ACUVIM_READ_IDLE          = 1,
+  ACUVIM_READ_IN_PROGRESS   = 2
 }acuvimReadState_t;
 
-EthernetClient ethClient;
-ModbusTCPClient modbusTCPClient(ethClient);
-IPAddress acuvimClientIp(192, 168, 20, 160);            
-IPAddress acuvimClientDns(0, 0, 0, 0);                  
-IPAddress acuvimClientSubnet(255, 255, 255, 0);     
-IPAddress acuvimClientGateway(0, 0, 0, 0);         
-IPAddress acuvimServerIp(192, 168, 20, 140);            /* Acuvim IP address*/ 
+using namespace machinecontrol;
+
+const char SERVER_IP_ADDRESS[] = "192.168.30.10";
+const char CLIENT_IP_ADDRESS[] = "192.168.30.5";
+const char SUBNET_MASK[] = "255.255.255.0";
+const char DEFAULT_GW[] = "192.168.30.5";
+
+EthernetInterface net;
+EthernetServer server;
+TCPSocket localSocket;
+TCPSocket *serverSocketPtr;
+ModbusTCPClient modbusTCPClient;
 
 bool AcuvimFault = false;
 acuvimBasicMeasurement20ms_t acuvim;
 
 /* private functions */
+/***************************************************************************************************
+ * ConnectEthernet
+ * 
+ * This function is called during initialisation to attempt AcuVim connection over ethernet.
+ *
+ * Parameters:
+ * None
+ *
+ * Return:
+ * true if modbus connected, otherwise false
+ *
+ **************************************************************************************************/
+bool ACUVIM_II::ConnectEthernet(void)
+{
+  bool isConnected = true;
+  nsapi_error_t networkError;
+  nsapi_connection_status_t networkStat;
+
+  networkStat = net.get_connection_status();  
+  
+  if(NSAPI_STATUS_DISCONNECTED == networkStat)
+  {
+    //setup static ip address
+    net.set_network(SERVER_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
+    
+    /* Bring up the ethernet interface */
+    networkError = net.connect(); 
+  }
+  
+  networkStat = net.get_connection_status();
+    
+  //while((networkStat != NSAPI_STATUS_GLOBAL_UP) && (elapsedTime < 10000));   
+  if ((networkStat != NSAPI_STATUS_GLOBAL_UP) || (networkError != NSAPI_ERROR_OK))
+  {
+    isConnected = false;
+  }
+
+  return isConnected;
+
+}      
+
 /***************************************************************************************************
  * CheckModbus
  * 
@@ -238,6 +284,12 @@ void ACUVIM_II::Init(void)
   }; 
 
   Serial.println("Initialising AcuVim II");
+
+  /* disable blocking whilst waiting for network */
+  net.set_blocking(false);
+
+  /* disable DHCP - use static IP address */
+  net.set_dhcp(false);
 
   /* Get MAC address of ethernet shield */
   Ethernet.MACAddress(mac);
