@@ -14,7 +14,6 @@
 #include <Arduino_MachineControl.h>
 #include "HAL/HAL_Timer.h"
 #include "HAL/HAL_DIO.h"
-#include "HAL/HAL_TCP.h"
 #include "APP/Debug.h"
 #include "APP/PowerControl.h"
 

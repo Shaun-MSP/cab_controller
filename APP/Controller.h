@@ -61,5 +61,7 @@ typedef enum STATE_BITS_ENUM
   NA_3              = 15
 }statusBitsEnum_t;
 
+#define MODBUS_DEFAULT_PORT 502
+
 #endif /* CONTROLLER_H */
   

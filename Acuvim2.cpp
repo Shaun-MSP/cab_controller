@@ -12,10 +12,10 @@
  *
  **************************************************************************************************/
 #include <Arduino_MachineControl.h>
-//#include <ArduinoRS485.h> // ArduinoModbus depends on the ArduinoRS485 library
 #include <ArduinoModbus.h>
-#include <SPI.h>
+#include <EthernetInterface.h>
 #include <Ethernet.h>
+#include "APP/Controller.h"
 #include "APP/Acuvim2.h"
 #include "HAL/HAL_Timer.h"
 
@@ -34,32 +34,41 @@
 
 typedef enum ACUVIM_FAULT
 {
-  ACU_FAULT_OK                = 0,
-  ACU_FAULT_NO_ETH_CONNECTION = 1
+  ACU_FAULT_OK         = 0,
+  ACU_FAULT_NO_COMMS   = 1
 }acuvimFault_t;
 
 typedef enum READ_STATE_ENUM
 {
-  ACUVIM_INIT               = 0,
-  ACUVIM_READ_IDLE          = 1,
-  ACUVIM_READ_IN_PROGRESS   = 2
+  ACUVIM_ETH_CONNECT_ENTRY       = 0,
+  ACUVIM_ETH_CONNECT_DURING      = 1,
+  ACUVIM_TCP_SOCKET_INIT_ENTRY   = 2,
+  ACUVIM_TCP_SOCKET_INIT_DURING  = 3,
+  ACUVIM_CONNECT_SERVER_ENTRY    = 4,
+  ACUVIM_CONNECT_SERVER_DURING   = 5,
+  ACUVIM_INIT_MODBUS_ENTRY       = 6,
+  ACUVIM_INIT_MODBUS_DURING      = 7,
+  ACUVIM_READ_IDLE_ENTRY         = 8,
+  ACUVIM_READ_IDLE_DURING        = 9,
+  ACUVIM_READ_IN_PROGRESS_ENTRY  = 10,
+  ACUVIM_READ_IN_PROGRESS_DURING = 11
 }acuvimReadState_t;
 
 using namespace machinecontrol;
 
-const char CLIENT_IP_ADDRESS[] = "192.168.30.10";
-const char SERVER_IP_ADDRESS[] = "192.168.30.5";
+const char SERVER_IP_ADDRESS[] = "192.168.30.5";  // AcuVim IP Addr
+const char CLIENT_IP_ADDRESS[] = "192.168.30.10";   // Controller IP Add
 const char SUBNET_MASK[] = "255.255.255.0";
 const char DEFAULT_GW[] = "192.168.30.5";
 
 EthernetInterface net;
-EthernetClient ethernetClient;
+EthernetClient ethClient;
 TCPSocket localSocket;
 TCPSocket *serverSocketPtr;
-ModbusTCPClient modbusTCPClient(ethernetClient);
+ModbusTCPClient modbusTCPClient(ethClient);
 
-bool AcuvimFault = false;
 acuvimBasicMeasurement20ms_t acuvim;
+bool isMeterReady = false;
 
 /* private functions */
 /***************************************************************************************************
@@ -102,6 +111,37 @@ bool ACUVIM_II::ConnectEthernet(void)
 }  
 
 /***************************************************************************************************
+ * InitEthernet
+ * 
+ * This function is called before each transaction to verify whether Modbus is connected.
+ *
+ * If not, it attempts to connect.
+ *
+ * Parameters:
+ * None
+ *
+ * Return:
+ * true if modbus connected, otherwise false
+ *
+ **************************************************************************************************/
+bool ACUVIM_II::InitEthernet(void)
+{
+  nsapi_error_t networkError;
+  nsapi_connection_status_t networkStat;
+  
+  networkStat = net.get_connection_status();  
+  
+  if(NSAPI_STATUS_DISCONNECTED == networkStat)
+  {
+    //setup static ip address
+    net.set_network(SERVER_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
+    
+    /* Bring up the ethernet interface */
+    networkError = net.connect(); 
+  }  
+}
+
+/***************************************************************************************************
  * InitTcpSocket
  * 
  * This function is called after ethernet connection to initialise the TCP socket for the ACUVIM
@@ -118,17 +158,15 @@ bool ACUVIM_II::InitTcpSocket(void)
 {
   bool isSocketInit = false;
   nsapi_error_t networkError;
+  SocketAddress addr;
 
   /* Open a socket on the network interface */
   networkError = localSocket.open(&net); 
 
   if (NSAPI_ERROR_OK == networkError)
   {
-    /* prevent execution blocking when operating on socket */
-    localSocket.set_blocking(false);
-
     /* addr is intermediate variable used for providing information to bind socket */
-    addr.set_ip_address(SERVER_IP_ADDRESS);
+    addr.set_ip_address(CLIENT_IP_ADDRESS);
     addr.set_port(502);
 
     /* configure socket */
@@ -141,6 +179,59 @@ bool ACUVIM_II::InitTcpSocket(void)
   }
 
   return isSocketInit;
+}
+
+/***************************************************************************************************
+ * ConnectServer
+ * 
+ * After network and socket is initialised, attempts to connect to Acuvim meter. It is recommended
+ * if this fails to connect, the calling function should close down the socket and start again.
+ *
+ * Parameters:
+ * None
+ *
+ * Return:
+ * true if TCP socket configured, otherwise false
+ *
+ **************************************************************************************************/
+bool ACUVIM_II::ConnectServer(void)
+{
+  bool isServerConnected = false;
+  nsapi_error_t networkError;
+  SocketAddress addr;
+
+  addr.set_ip_address(SERVER_IP_ADDRESS);
+  addr.set_port(MODBUS_DEFAULT_PORT);
+
+  networkError = localSocket.connect(addr); 
+
+  if(NSAPI_ERROR_OK == networkError)
+  {
+    isServerConnected = true;
+  }
+
+  return isServerConnected;
+}
+
+/***************************************************************************************************
+ * ModbusClientInit
+ * 
+ * After network connection has been established with acuvim meter, configure modbus client.
+ *
+ * Parameters:
+ * None
+ *
+ * Return:
+ * true if TCP socket configured, otherwise false
+ *
+ **************************************************************************************************/
+bool ACUVIM_II::ModbusClientInit(void)
+{
+  bool isConnected;
+  
+  isConnected = (bool)modbusTCPClient.begin(SERVER_IP_ADDRESS, MODBUS_DEFAULT_PORT);    
+
+  return isConnected;
 }
 
 /***************************************************************************************************
@@ -159,7 +250,7 @@ bool ACUVIM_II::InitTcpSocket(void)
  **************************************************************************************************/
 bool ACUVIM_II::CheckModbus(void)
 {
-  // bool isConnected = true;
+  bool isConnected = true;
 
   // if (!modbusTCPClient.connected()) 
   // {
@@ -176,8 +267,11 @@ bool ACUVIM_II::CheckModbus(void)
   //       Serial.println("Modbus TCP Client connected");
   //       isConnected = true;
   //     }
-  // }      
+  // }   
+  return isConnected;
 }
+
+
 
 /***************************************************************************************************
  * BasicRead20ms
@@ -330,6 +424,10 @@ void ACUVIM_II::Init(void)
 
   /* disable DHCP - use static IP address */
   net.set_dhcp(false);
+
+  /* prevent execution blocking when operating on socket */
+  localSocket.set_blocking(false);
+
 }
 
 
@@ -349,72 +447,116 @@ void ACUVIM_II::Init(void)
  **********************************************************************************************/
 bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
 {
+  bool result;
   bool isNewData = false;
-  bool result = false;;
-  static acuvimReadState_t readState = ACUVIM_READ_IDLE;    
+  static acuvimReadState_t readState = ACUVIM_ETH_CONNECT_ENTRY;    
 
-  if (ACU_FAULT_SHIELD_OK == AcuvimFault)
+
+  switch (readState)
   {
-    switch (readState)
-    {
-      case ACUVIM_ETH_CONNECT_ENTRY:
-        Serial.println("ACUVIM: Connecting ethernet...");
-        readState = ACUVIM_ETH_CONNECT_DURING;
-        break;
+    case ACUVIM_ETH_CONNECT_ENTRY:
+      Serial.println("ACUVIM: DB1");
+      /* Close down any open network connections */
+      localSocket.close();
+      net.disconnect();
+      isMeterReady = false;
+      Serial.println("ACUVIM: Connecting ethernet...");
+      readState = ACUVIM_ETH_CONNECT_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_ETH_CONNECT_DURING:
+      result = ConnectEthernet();
+      if(true == result)
+      {
+        Serial.println("ACUVIM: Ethernet connected...");
+        readState = ACUVIM_TCP_SOCKET_INIT_ENTRY;
+      }
+      break;
 
-      case ACUVIM_ETH_CONNECT_DURING:
-        result = ConnectEthernet();
-        if(true == result)
-        {
-          Serial.println("ACUVIM: Ethernet connected...");
-          readState = ACUVIM_SOCKET_INIT_ENTRY;
-        }
-        break;
+    case ACUVIM_TCP_SOCKET_INIT_ENTRY:
+      Serial.println("ACUVIM: Initialising TCP socket...");
+      readState = ACUVIM_TCP_SOCKET_INIT_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_TCP_SOCKET_INIT_DURING:
+      result = InitTcpSocket();
 
-      case ACUVIM_TCP_SOCKET_INIT_ENTRY:
-        Serial.println("ACUVIM: Initialising TCP socket...");
-        readState = ACUVIM_TCP_SOCKET_INIT_DURING;
-        break;
+      if(true == result)
+      {
+        Serial.println("ACUVIM: TCP socket initialised...");
+        readState = ACUVIM_CONNECT_SERVER_ENTRY;
+      }        
+      break;
 
-      case ACUVIM_TCP_SOCKET_INIT_DURING:
-        result = InitTcpSocket();
+    case ACUVIM_CONNECT_SERVER_ENTRY:
+      Serial.println("ACUVIM: Waiting to connect...");
+      readState = ACUVIM_CONNECT_SERVER_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_CONNECT_SERVER_DURING:
+      result = ConnectServer();
 
-        if(true == result)
-        {
-          Serial.println("ACUVIM: TCP socket initialised...");
-          readState = ACUVIM_SOCKET_INIT_ENTRY;
-        }        
-        break;
+      if(true == result)
+      {
+        readState = ACUVIM_INIT_MODBUS_ENTRY;
+        Serial.println("ACUVIM: Connected");
+      }
+      else
+      {
+        /* if connection to server fails try again */
+        readState = ACUVIM_ETH_CONNECT_ENTRY;
+        Serial.println("ACUVIM: Connection failed, retrying...");
+      }
+      break;
 
-      case ACUVIM_READ_IDLE:
-        BasicRequest20ms();                     // initiate new read
-        readState = ACUVIM_READ_IN_PROGRESS;
-        break;
+    case ACUVIM_INIT_MODBUS_ENTRY:
+      Serial.println("ACUVIM: Initialising Modbus client...");
+      readState = ACUVIM_INIT_MODBUS_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_INIT_MODBUS_DURING:
+      result = ModbusClientInit();
+      if(true == result)
+      {
+        readState = ACUVIM_READ_IDLE_ENTRY;
+        isMeterReady = true;
+        Serial.println("ACUVIM: Complete");
+      }
+      else
+      {
+        readState = ACUVIM_ETH_CONNECT_ENTRY;
+      }
+      break;
 
-      case ACUVIM_READ_IN_PROGRESS:           // poll for data
-        isNewData = BasicRead20ms();
-        if (true == isNewData)
-        {
-          *measurements = acuvim;              // transfer read data to pointer
-          readState = ACUVIM_READ_IDLE;
-        }
-        break;
+    case ACUVIM_READ_IDLE_ENTRY:
+      readState = ACUVIM_ETH_CONNECT_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_READ_IDLE_DURING:
+      BasicRequest20ms();                     // initiate new read
+      readState = ACUVIM_READ_IN_PROGRESS_ENTRY;
+      break;
 
-      default:
-        /* invalid state, so reset */
-        readState = ACUVIM_READ_IDLE;
-        break;
-    } /* switch (readState) */
-  } /* if (ACU_FAULT_SHIELD_OK == AcuvimFault) */
+    case ACUVIM_READ_IN_PROGRESS_ENTRY:
+      readState = ACUVIM_READ_IN_PROGRESS_DURING;
+      /* Fall straight through to.... */
+    case ACUVIM_READ_IN_PROGRESS_DURING:           // poll for data
+      isNewData = BasicRead20ms();
+      if (true == isNewData)
+      {
+        *measurements = acuvim;              // transfer read data to pointer
+        readState = ACUVIM_READ_IDLE_ENTRY;
+      }
+      break;
+
+    default:
+      /* invalid state, so reset */
+      readState = ACUVIM_READ_IDLE_ENTRY;
+      break;
+  } /* switch (readState) */
 
   return isNewData;
 }
 
 /***********************************************************************************************
- * GetFaultState
+ * GetReadyState
  * 
- * This function is calles to determine whether there is a fault on the meter preventing it
- * from providing measurements.
+ * This function is called to determine whether the meter is able to provide measurements.
  *
  * Parameters:
  * None.
@@ -423,16 +565,9 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
  * true if fault present, otherwise false.
  *
  **********************************************************************************************/
-bool ACUVIM_II::GetFaultState(void)
+bool ACUVIM_II::GetReadyState(void)
 {
-  bool fault = false;
-
-  if (AcuvimFault != ACU_FAULT_SHIELD_OK)
-  {
-    fault = true;
-  }
-
-  return fault;  
+  return isMeterReady;  
 }
 
 

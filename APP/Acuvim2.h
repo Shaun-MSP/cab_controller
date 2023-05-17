@@ -37,6 +37,10 @@ class ACUVIM_II
     bool AcuvimFault;
     acuvimBasicMeasurement20ms_t acuvim;
     bool ConnectEthernet(void);
+    bool InitEthernet(void);
+    bool InitTcpSocket(void);
+    bool ConnectServer(void);
+    bool ModbusClientInit(void);   
     void BasicRequest20ms(void);
     bool BasicRead20ms(void);
     bool CheckModbus(void);
@@ -48,7 +52,7 @@ class ACUVIM_II
     } 
     void Init(void);
     bool Control(acuvimBasicMeasurement20ms_t *measurements);
-    bool GetFaultState(void);
+    bool GetReadyState(void);
 };
 
 #endif */ ACUVIM2_H */

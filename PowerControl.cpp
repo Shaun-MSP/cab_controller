@@ -248,14 +248,14 @@ bool POWER_CTRL::ReadMeter(void)
   bool isMeterDataAvail;
   static uint16_t meterLatency_ms = 0U;
   bool meterAvailable = true;
-  bool isMeterFault;
-  
-  isMeterFault = acuvimObj.GetFaultState();
+  bool isReady;
 
-  if(false == isMeterFault) // Only proceed if no fault detected with meter
+  isMeterDataAvail = acuvimObj.Control(&meterData);   //poll meter for new measurements.
+
+  isReady = acuvimObj.GetReadyState();
+
+  if(true == isReady) // Only proceed if no fault detected with meter
   {
-    isMeterDataAvail = acuvimObj.Control(&meterData);   //poll meter for new measurements.
-
     if (true == isMeterDataAvail)   // proceed if fresh meter data
     {
       meterLatency_ms = 0U;         // Reset meter latency timer
@@ -270,7 +270,7 @@ bool POWER_CTRL::ReadMeter(void)
     }
   }
 
-  if ((meterLatency_ms >= TWO_SECONDS_MS) || (true == isMeterFault))
+  if ((meterLatency_ms >= TWO_SECONDS_MS) || (true == isReady))
   {
     meterAvailable = false;
   }
@@ -704,6 +704,7 @@ void POWER_CTRL::Control(uint16_t sysCounter)
 
   #ifdef HIL_TST
    static uint16_t meterDelay = 0U;
+   isMeterOk = ReadMeter();              //shaun not needed - just for test
    isMeterOk = true;
    flexFault = false;  
    meterData.frequency = hilTestObj.GetFreq();
