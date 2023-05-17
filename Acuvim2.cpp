@@ -47,16 +47,16 @@ typedef enum READ_STATE_ENUM
 
 using namespace machinecontrol;
 
-const char SERVER_IP_ADDRESS[] = "192.168.30.10";
-const char CLIENT_IP_ADDRESS[] = "192.168.30.5";
+const char CLIENT_IP_ADDRESS[] = "192.168.30.10";
+const char SERVER_IP_ADDRESS[] = "192.168.30.5";
 const char SUBNET_MASK[] = "255.255.255.0";
 const char DEFAULT_GW[] = "192.168.30.5";
 
 EthernetInterface net;
-EthernetServer server;
+EthernetClient ethernetClient;
 TCPSocket localSocket;
 TCPSocket *serverSocketPtr;
-ModbusTCPClient modbusTCPClient;
+ModbusTCPClient modbusTCPClient(ethernetClient);
 
 bool AcuvimFault = false;
 acuvimBasicMeasurement20ms_t acuvim;
@@ -76,7 +76,7 @@ acuvimBasicMeasurement20ms_t acuvim;
  **************************************************************************************************/
 bool ACUVIM_II::ConnectEthernet(void)
 {
-  bool isConnected = true;
+  bool isConnected = false;
   nsapi_error_t networkError;
   nsapi_connection_status_t networkStat;
 
@@ -85,8 +85,7 @@ bool ACUVIM_II::ConnectEthernet(void)
   if(NSAPI_STATUS_DISCONNECTED == networkStat)
   {
     //setup static ip address
-    net.set_network(SERVER_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
-    
+    net.set_network(CLIENT_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
     /* Bring up the ethernet interface */
     networkError = net.connect(); 
   }
@@ -94,14 +93,55 @@ bool ACUVIM_II::ConnectEthernet(void)
   networkStat = net.get_connection_status();
     
   //while((networkStat != NSAPI_STATUS_GLOBAL_UP) && (elapsedTime < 10000));   
-  if ((networkStat != NSAPI_STATUS_GLOBAL_UP) || (networkError != NSAPI_ERROR_OK))
+  if ((networkStat == NSAPI_STATUS_GLOBAL_UP) && (networkError == NSAPI_ERROR_OK))
   {
-    isConnected = false;
+    isConnected = true;
   }
 
   return isConnected;
+}  
 
-}      
+/***************************************************************************************************
+ * InitTcpSocket
+ * 
+ * This function is called after ethernet connection to initialise the TCP socket for the ACUVIM
+ * Modbus connection.
+ *
+ * Parameters:
+ * None
+ *
+ * Return:
+ * true if TCP socket configured, otherwise false
+ *
+ **************************************************************************************************/
+bool ACUVIM_II::InitTcpSocket(void)
+{
+  bool isSocketInit = false;
+  nsapi_error_t networkError;
+
+  /* Open a socket on the network interface */
+  networkError = localSocket.open(&net); 
+
+  if (NSAPI_ERROR_OK == networkError)
+  {
+    /* prevent execution blocking when operating on socket */
+    localSocket.set_blocking(false);
+
+    /* addr is intermediate variable used for providing information to bind socket */
+    addr.set_ip_address(SERVER_IP_ADDRESS);
+    addr.set_port(502);
+
+    /* configure socket */
+    networkError = localSocket.bind(addr);      
+  }
+
+  if (NSAPI_ERROR_OK == networkError)
+  {
+    isSocketInit = true;
+  }
+
+  return isSocketInit;
+}
 
 /***************************************************************************************************
  * CheckModbus
@@ -119,24 +159,24 @@ bool ACUVIM_II::ConnectEthernet(void)
  **************************************************************************************************/
 bool ACUVIM_II::CheckModbus(void)
 {
-  bool isConnected = true;
+  // bool isConnected = true;
 
-  if (!modbusTCPClient.connected()) 
-  {
-    // client not connected, start the Modbus TCP client
-    Serial.println("Attempting to connect to Modbus TCP server");
+  // if (!modbusTCPClient.connected()) 
+  // {
+  //   // client not connected, start the Modbus TCP client
+  //   Serial.println("Attempting to connect to Modbus TCP server");
 
-      if (!modbusTCPClient.begin(acuvimServerIp, 502)) 
-      {
-        Serial.println("Modbus TCP Client failed to connect!");
-        isConnected = false;
-      } 
-      else 
-      {
-        Serial.println("Modbus TCP Client connected");
-        isConnected = true;
-      }
-  }      
+  //     if (!modbusTCPClient.begin(acuvimClientIp, 502)) 
+  //     {
+  //       Serial.println("Modbus TCP Client failed to connect!");
+  //       isConnected = false;
+  //     } 
+  //     else 
+  //     {
+  //       Serial.println("Modbus TCP Client connected");
+  //       isConnected = true;
+  //     }
+  // }      
 }
 
 /***************************************************************************************************
@@ -290,32 +330,9 @@ void ACUVIM_II::Init(void)
 
   /* disable DHCP - use static IP address */
   net.set_dhcp(false);
-
-  /* Get MAC address of ethernet shield */
-  Ethernet.MACAddress(mac);
-
-  /* start the Ethernet connection and the server: */
-  Ethernet.begin(mac, acuvimClientIp, 
-                      acuvimClientDns, 
-                      acuvimClientGateway, 
-                      acuvimClientSubnet, ACUVIM_TIMEOUT, ACUVIM_RESPONSE_TIMEOUT);
-  //Ethernet.begin(mac, acuvimClient);
-  /* Check for Ethernet hardware present */
-  if (EthernetNoHardware == Ethernet.hardwareStatus()) 
-  {
-    Serial.println("Ethernet shield not found");
-    AcuvimFault = ACU_FAULT_NO_ETH_SHIELD;
-  }
-  else if (Ethernet.linkStatus() == LinkOFF) 
-  {
-    Serial.println("Accuvim ethernet cable is not connected.");
-    AcuvimFault = ACU_FAULT_NO_ETH_CONNECTION;
-  }
-  else
-  {
-    AcuvimFault = ACU_FAULT_SHIELD_OK;
-  }
 }
+
+
 
 /***********************************************************************************************
  * Control
@@ -333,12 +350,42 @@ void ACUVIM_II::Init(void)
 bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
 {
   bool isNewData = false;
+  bool result = false;;
   static acuvimReadState_t readState = ACUVIM_READ_IDLE;    
 
   if (ACU_FAULT_SHIELD_OK == AcuvimFault)
   {
     switch (readState)
     {
+      case ACUVIM_ETH_CONNECT_ENTRY:
+        Serial.println("ACUVIM: Connecting ethernet...");
+        readState = ACUVIM_ETH_CONNECT_DURING;
+        break;
+
+      case ACUVIM_ETH_CONNECT_DURING:
+        result = ConnectEthernet();
+        if(true == result)
+        {
+          Serial.println("ACUVIM: Ethernet connected...");
+          readState = ACUVIM_SOCKET_INIT_ENTRY;
+        }
+        break;
+
+      case ACUVIM_TCP_SOCKET_INIT_ENTRY:
+        Serial.println("ACUVIM: Initialising TCP socket...");
+        readState = ACUVIM_TCP_SOCKET_INIT_DURING;
+        break;
+
+      case ACUVIM_TCP_SOCKET_INIT_DURING:
+        result = InitTcpSocket();
+
+        if(true == result)
+        {
+          Serial.println("ACUVIM: TCP socket initialised...");
+          readState = ACUVIM_SOCKET_INIT_ENTRY;
+        }        
+        break;
+
       case ACUVIM_READ_IDLE:
         BasicRequest20ms();                     // initiate new read
         readState = ACUVIM_READ_IN_PROGRESS;
