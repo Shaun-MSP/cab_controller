@@ -306,8 +306,7 @@ void APP_CAN::Init(void)
   comm_protocols.can.frequency(DATARATE_500K);
 
   statRxHandle = comm_protocols.can.filter(MID_STATUS, 0x1FFFFFFFU, CANExtended, STATUS_MSG_HANDLE);
-  Serial.print("Status msg handle: ");
-  Serial.println(statRxHandle);
+  
   Serial.println("CAN Initialisation done");
 }
 

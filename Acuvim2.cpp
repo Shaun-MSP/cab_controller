@@ -21,6 +21,7 @@
 
 #define ACUVIM_TIMEOUT            FIFTEEN_SECONDS_MS
 #define ACUVIM_RESPONSE_TIMEOUT   TEN_SECONDS_MS
+#define ETHERNET_CONNECT_TIMEOUT  10000U    // in ms
 
 /* uncomment for additional debug output */
 //#define DEBUG_ACUVIEW
@@ -95,50 +96,19 @@ bool ACUVIM_II::ConnectEthernet(void)
   {
     //setup static ip address
     net.set_network(CLIENT_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
-    /* Bring up the ethernet interface */
-    networkError = net.connect(); 
-  }
-  
-  networkStat = net.get_connection_status();
     
-  //while((networkStat != NSAPI_STATUS_GLOBAL_UP) && (elapsedTime < 10000));   
-  if ((networkStat == NSAPI_STATUS_GLOBAL_UP) && (networkError == NSAPI_ERROR_OK))
+    /* Bring up the ethernet interface */
+    (void)net.connect(); 
+
+    networkStat = net.get_connection_status();
+  }
+
+  if (networkStat == NSAPI_STATUS_GLOBAL_UP)
   {
     isConnected = true;
   }
 
   return isConnected;
-}  
-
-/***************************************************************************************************
- * InitEthernet
- * 
- * This function is called before each transaction to verify whether Modbus is connected.
- *
- * If not, it attempts to connect.
- *
- * Parameters:
- * None
- *
- * Return:
- * true if modbus connected, otherwise false
- *
- **************************************************************************************************/
-bool ACUVIM_II::InitEthernet(void)
-{
-  nsapi_error_t networkError;
-  nsapi_connection_status_t networkStat;
-  
-  networkStat = net.get_connection_status();  
-  
-  if(NSAPI_STATUS_DISCONNECTED == networkStat)
-  {
-    //setup static ip address
-    net.set_network(SERVER_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
-    
-    /* Bring up the ethernet interface */
-    networkError = net.connect(); 
-  }  
 }
 
 /***************************************************************************************************
@@ -447,15 +417,14 @@ void ACUVIM_II::Init(void)
  **********************************************************************************************/
 bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
 {
+  static uint16_t timeoutTimer = 0U;
   bool result;
   bool isNewData = false;
   static acuvimReadState_t readState = ACUVIM_ETH_CONNECT_ENTRY;    
 
-
   switch (readState)
   {
-    case ACUVIM_ETH_CONNECT_ENTRY:
-      Serial.println("ACUVIM: DB1");
+    case ACUVIM_ETH_CONNECT_ENTRY:     
       /* Close down any open network connections */
       localSocket.close();
       net.disconnect();
@@ -467,8 +436,21 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
       result = ConnectEthernet();
       if(true == result)
       {
+        timeoutTimer = 0U;
         Serial.println("ACUVIM: Ethernet connected...");
         readState = ACUVIM_TCP_SOCKET_INIT_ENTRY;
+      }
+      else
+      {
+        if(timeoutTimer < ETHERNET_CONNECT_TIMEOUT)
+        {
+          timeoutTimer++;
+        }
+        else
+        {
+          net.disconnect();
+          timeoutTimer = 0U;
+        }
       }
       break;
 
@@ -546,7 +528,7 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
 
     default:
       /* invalid state, so reset */
-      readState = ACUVIM_READ_IDLE_ENTRY;
+      readState = ACUVIM_ETH_CONNECT_ENTRY;
       break;
   } /* switch (readState) */
 

@@ -648,6 +648,7 @@ void POWER_CTRL::Init(void)
     #ifdef HIL_TST
      hilTestObj.Init(maxRated);
     #endif
+
     powerPid.SetOutputLimits(-(double)maxRated, (double)maxRated);
     powerPid.SetTunings(pcAcObj[AC_POWER_CONTROL].pGain,
                         pcAcObj[AC_POWER_CONTROL].iGain, 
@@ -665,7 +666,8 @@ void POWER_CTRL::Init(void)
     #ifdef PID_TUNE
     Serial.setTimeout(1);  /*2ms timeout for reading serial port */
     #endif
-    lp_filter_init(&hil_filter);
+
+    //lp_filter_init(&hil_filter);
 }
 
 /***************************************************************************************************
@@ -704,7 +706,7 @@ void POWER_CTRL::Control(uint16_t sysCounter)
 
   #ifdef HIL_TST
    static uint16_t meterDelay = 0U;
-   isMeterOk = ReadMeter();              //shaun not needed - just for test
+   //isMeterOk = ReadMeter();              //shaun not needed - just for test
    isMeterOk = true;
    flexFault = false;  
    meterData.frequency = hilTestObj.GetFreq();
