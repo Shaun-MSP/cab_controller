@@ -706,7 +706,7 @@ void POWER_CTRL::Control(uint16_t sysCounter)
 
   #ifdef HIL_TST
    static uint16_t meterDelay = 0U;
-   //isMeterOk = ReadMeter();              //shaun not needed - just for test
+   isMeterOk = ReadMeter();              //shaun not needed - just for test
    isMeterOk = true;
    flexFault = false;  
    meterData.frequency = hilTestObj.GetFreq();

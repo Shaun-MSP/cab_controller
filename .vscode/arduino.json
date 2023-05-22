@@ -1,0 +1,6 @@
+{
+    "configuration": "target_core=cm7,split=50_50,security=none",
+    "board": "arduino:mbed_portenta:envie_m7",
+    "port": "COM3",
+    "sketch": "controller_cab1000.ino"
+}

@@ -31,7 +31,8 @@
 
 #define ACUVIM_MB_FREQ_ADDR               0x3400 /* TBD */
 #define ACUVIM_MB_REAL_POWER_TOTAL_ADDR   0x3400 /* TBD */
-#define ACUVIM_MB_BASIC_20MS_ADDR         0x3400
+//#define ACUVIM_MB_BASIC_20MS_ADDR         0x4000
+#define ACUVIM_MB_BASIC_20MS_ADDR         0x0
 
 typedef enum ACUVIM_FAULT
 {
@@ -57,8 +58,8 @@ typedef enum READ_STATE_ENUM
 
 using namespace machinecontrol;
 
-const char SERVER_IP_ADDRESS[] = "192.168.30.5";  // AcuVim IP Addr
-const char CLIENT_IP_ADDRESS[] = "192.168.30.10";   // Controller IP Add
+const char SERVER_IP_ADDRESS[] = "192.168.1.254";  // AcuVim IP Addr
+const char CLIENT_IP_ADDRESS[] = "192.168.1.10";   // Controller IP Add
 const char SUBNET_MASK[] = "255.255.255.0";
 const char DEFAULT_GW[] = "192.168.30.5";
 
@@ -178,6 +179,15 @@ bool ACUVIM_II::ConnectServer(void)
   if(NSAPI_ERROR_OK == networkError)
   {
     isServerConnected = true;
+    ethClient.setSocket(&localSocket);
+
+    addr = ethClient.getSocket();
+
+    Serial.print ("ethClient IP: ");
+    Serial.println (addr.get_ip_address());
+    Serial.print ("ethClient Port: ");
+    Serial.println (addr.get_port());
+
   }
 
   return isServerConnected;
@@ -199,7 +209,15 @@ bool ACUVIM_II::ModbusClientInit(void)
 {
   bool isConnected;
   
-  isConnected = (bool)modbusTCPClient.begin(SERVER_IP_ADDRESS, MODBUS_DEFAULT_PORT);    
+  isConnected = (bool)modbusTCPClient.connected();
+
+  if (true == isConnected)
+  {
+    isConnected = modbusTCPClient.begin(SERVER_IP_ADDRESS, MODBUS_DEFAULT_PORT);    
+  }
+
+  Serial.print("Modbus connected: ");
+  Serial.println(isConnected);
 
   return isConnected;
 }
@@ -510,7 +528,9 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
       readState = ACUVIM_ETH_CONNECT_DURING;
       /* Fall straight through to.... */
     case ACUVIM_READ_IDLE_DURING:
+      digital_outputs.set(2, HIGH);
       BasicRequest20ms();                     // initiate new read
+      digital_outputs.set(2, LOW);
       readState = ACUVIM_READ_IN_PROGRESS_ENTRY;
       break;
 
@@ -518,7 +538,9 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
       readState = ACUVIM_READ_IN_PROGRESS_DURING;
       /* Fall straight through to.... */
     case ACUVIM_READ_IN_PROGRESS_DURING:           // poll for data
+      digital_outputs.set(3, HIGH);
       isNewData = BasicRead20ms();
+      digital_outputs.set(3, LOW);
       if (true == isNewData)
       {
         *measurements = acuvim;              // transfer read data to pointer
