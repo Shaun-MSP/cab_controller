@@ -31,8 +31,7 @@
 
 #define ACUVIM_MB_FREQ_ADDR               0x3400 /* TBD */
 #define ACUVIM_MB_REAL_POWER_TOTAL_ADDR   0x3400 /* TBD */
-//#define ACUVIM_MB_BASIC_20MS_ADDR         0x4000
-#define ACUVIM_MB_BASIC_20MS_ADDR         0x0
+#define ACUVIM_MB_BASIC_20MS_ADDR         0x4000
 
 typedef enum ACUVIM_FAULT
 {
@@ -59,13 +58,15 @@ typedef enum READ_STATE_ENUM
 using namespace machinecontrol;
 
 const char SERVER_IP_ADDRESS[] = "192.168.1.254";  // AcuVim IP Addr
-const char CLIENT_IP_ADDRESS[] = "192.168.1.10";   // Controller IP Add
+const IPAddress MODBUS_SERVER_IP_ADDRESS(192, 168, 1, 254);
+const char CLIENT_IP_ADDRESS[] = "192.168.1.10";   // Controller IP Address
 const char SUBNET_MASK[] = "255.255.255.0";
-const char DEFAULT_GW[] = "192.168.30.5";
+const char DEFAULT_GW[] = "192.168.1.254";
 
 EthernetInterface net;
 EthernetClient ethClient;
-TCPSocket localSocket;
+
+//shaun still works with laptop if this is removed TCPSocket localSocket;
 TCPSocket *serverSocketPtr;
 ModbusTCPClient modbusTCPClient(ethClient);
 
@@ -130,24 +131,36 @@ bool ACUVIM_II::InitTcpSocket(void)
   bool isSocketInit = false;
   nsapi_error_t networkError;
   SocketAddress addr;
+  TCPSocket localSocket;
+
+
+  localSocket.listen();
+
+  localSocket.accept();
 
   /* Open a socket on the network interface */
-  networkError = localSocket.open(&net); 
+  //shaun still works with laptop if this is removed networkError = localSocket.open(&net); 
 
-  if (NSAPI_ERROR_OK == networkError)
-  {
+  //shaun still works with laptop if this is removed if (NSAPI_ERROR_OK == networkError)
+  //shaun still works with laptop if this is removed {
     /* addr is intermediate variable used for providing information to bind socket */
+    //shaun still works with laptop if this is removed 
     addr.set_ip_address(CLIENT_IP_ADDRESS);
-    addr.set_port(502);
+    //shaun still works with laptop if this is removed 
+    //addr.set_port(502);
+    localSocket.bind(addr);
+    ethClient.setSocket(&localSocket);
+
 
     /* configure socket */
-    networkError = localSocket.bind(addr);      
-  }
+    //shaun still works with laptop if this is removed networkError = localSocket.bind(addr);   
+    //shaun still works with laptop if this is removed ethClient.setSocket(&localSocket);
+  //shaun still works with laptop if this is removed }
 
-  if (NSAPI_ERROR_OK == networkError)
-  {
+  //shaun still works with laptop if this is removed if (NSAPI_ERROR_OK == networkError)
+  //shaun still works with laptop if this is removed {
     isSocketInit = true;
-  }
+  //shaun still works with laptop if this is removed }
 
   return isSocketInit;
 }
@@ -170,25 +183,17 @@ bool ACUVIM_II::ConnectServer(void)
   bool isServerConnected = false;
   nsapi_error_t networkError;
   SocketAddress addr;
-
+  
   addr.set_ip_address(SERVER_IP_ADDRESS);
   addr.set_port(MODBUS_DEFAULT_PORT);
 
-  networkError = localSocket.connect(addr); 
+  // shaun works with laptop if this is removed networkError = localSocket.connect(addr); 
 
-  if(NSAPI_ERROR_OK == networkError)
-  {
-    isServerConnected = true;
-    ethClient.setSocket(&localSocket);
-
-    addr = ethClient.getSocket();
-
-    Serial.print ("ethClient IP: ");
-    Serial.println (addr.get_ip_address());
-    Serial.print ("ethClient Port: ");
-    Serial.println (addr.get_port());
-
-  }
+  // Stops working with laptop if this is removed
+  //if(NSAPI_ERROR_OK == networkError)
+  //{
+    isServerConnected = ethClient.connect(addr);
+  //}
 
   return isServerConnected;
 }
@@ -213,7 +218,7 @@ bool ACUVIM_II::ModbusClientInit(void)
 
   if (true == isConnected)
   {
-    isConnected = modbusTCPClient.begin(SERVER_IP_ADDRESS, MODBUS_DEFAULT_PORT);    
+    isConnected = modbusTCPClient.begin(MODBUS_SERVER_IP_ADDRESS, MODBUS_DEFAULT_PORT);    
   }
 
   Serial.print("Modbus connected: ");
@@ -282,7 +287,7 @@ bool ACUVIM_II::BasicRead20ms(void)
   uint8_t loopCount;
   bool isNewData = false;
 
-  if(true == CheckModbus())
+  if (true == (bool)modbusTCPClient.connected())
   { 
     /* Check to see how many values received */
     noofValues = modbusTCPClient.available();
@@ -369,8 +374,18 @@ bool ACUVIM_II::BasicRead20ms(void)
  **************************************************************************************************/
 void ACUVIM_II::BasicRequest20ms(void)
 {
-  if(true == CheckModbus())
-  {      
+  SocketAddress addr;
+  uint16_t data[] = {0x55, 0xAA};
+
+  addr.set_ip_address(SERVER_IP_ADDRESS);
+  addr.set_port(MODBUS_DEFAULT_PORT);
+
+  
+
+  if (true == (bool)modbusTCPClient.connected())
+  {  
+      Serial.println("SENDING...");
+    
     if (!modbusTCPClient.requestFrom(HOLDING_REGISTERS, 
                                     ACUVIM_MB_BASIC_20MS_ADDR, 
                                     NOOF_BASIC_REGS_20MS)) 
@@ -414,7 +429,7 @@ void ACUVIM_II::Init(void)
   net.set_dhcp(false);
 
   /* prevent execution blocking when operating on socket */
-  localSocket.set_blocking(false);
+  //shaun still works with laptop if this is removed localSocket.set_blocking(false);
 
 }
 
@@ -444,7 +459,7 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
   {
     case ACUVIM_ETH_CONNECT_ENTRY:     
       /* Close down any open network connections */
-      localSocket.close();
+      //shaun still works with laptop if this is removed localSocket.close();
       net.disconnect();
       isMeterReady = false;
       Serial.println("ACUVIM: Connecting ethernet...");
