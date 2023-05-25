@@ -58,10 +58,10 @@ typedef enum READ_STATE_ENUM
 using namespace machinecontrol;
 
 const char SERVER_IP_ADDRESS[] = "192.168.1.254";  // AcuVim IP Addr
-const IPAddress MODBUS_SERVER_IP_ADDRESS(192, 168, 1, 254);
+const IPAddress MODBUS_SERVER_IP_ADDRESS{192, 168, 1, 254};
 const char CLIENT_IP_ADDRESS[] = "192.168.1.10";   // Controller IP Address
 const char SUBNET_MASK[] = "255.255.255.0";
-const char DEFAULT_GW[] = "192.168.1.254";
+const char DEFAULT_GW[] = "192.168.1.1";
 
 EthernetInterface net;
 EthernetClient ethClient;
@@ -91,6 +91,7 @@ bool ACUVIM_II::ConnectEthernet(void)
   bool isConnected = false;
   nsapi_error_t networkError;
   nsapi_connection_status_t networkStat;
+  SocketAddress addr;
 
   networkStat = net.get_connection_status();  
   
@@ -98,9 +99,9 @@ bool ACUVIM_II::ConnectEthernet(void)
   {
     //setup static ip address
     net.set_network(CLIENT_IP_ADDRESS, SUBNET_MASK, DEFAULT_GW);
-    
+
     /* Bring up the ethernet interface */
-    (void)net.connect(); 
+    networkError = net.connect(); 
 
     networkStat = net.get_connection_status();
   }
@@ -133,28 +134,21 @@ bool ACUVIM_II::InitTcpSocket(void)
   SocketAddress addr;
   TCPSocket localSocket;
 
-
-  localSocket.listen();
-
-  localSocket.accept();
-
   /* Open a socket on the network interface */
   //shaun still works with laptop if this is removed networkError = localSocket.open(&net); 
 
   //shaun still works with laptop if this is removed if (NSAPI_ERROR_OK == networkError)
   //shaun still works with laptop if this is removed {
     /* addr is intermediate variable used for providing information to bind socket */
-    //shaun still works with laptop if this is removed 
-    addr.set_ip_address(CLIENT_IP_ADDRESS);
-    //shaun still works with laptop if this is removed 
-    //addr.set_port(502);
-    localSocket.bind(addr);
-    ethClient.setSocket(&localSocket);
-
+    //shaun still works with laptop if this is removed addr.set_ip_address(CLIENT_IP_ADDRESS);
+    
+    //shaun still works with laptop if this is removed addr.set_port(502);
 
     /* configure socket */
-    //shaun still works with laptop if this is removed networkError = localSocket.bind(addr);   
-    //shaun still works with laptop if this is removed ethClient.setSocket(&localSocket);
+    //shaun still works with laptop if this is removed networkError = localSocket.bind(addr); 
+    
+    //shaun still works with laptop if this is removed 
+    ethClient.setSocket(&localSocket);
   //shaun still works with laptop if this is removed }
 
   //shaun still works with laptop if this is removed if (NSAPI_ERROR_OK == networkError)
@@ -183,18 +177,20 @@ bool ACUVIM_II::ConnectServer(void)
   bool isServerConnected = false;
   nsapi_error_t networkError;
   SocketAddress addr;
-  
+  uint8_t status;
+ 
   addr.set_ip_address(SERVER_IP_ADDRESS);
   addr.set_port(MODBUS_DEFAULT_PORT);
 
   // shaun works with laptop if this is removed networkError = localSocket.connect(addr); 
-
   // Stops working with laptop if this is removed
   //if(NSAPI_ERROR_OK == networkError)
-  //{
-    isServerConnected = ethClient.connect(addr);
+  //{ 
+  Serial.println("DB1");
+  isServerConnected = ethClient.connect(addr);
+  Serial.println("DB2");
+  
   //}
-
   return isServerConnected;
 }
 
@@ -213,6 +209,7 @@ bool ACUVIM_II::ConnectServer(void)
 bool ACUVIM_II::ModbusClientInit(void)
 {
   bool isConnected;
+  IPAddress ip;
   
   isConnected = (bool)modbusTCPClient.connected();
 
@@ -372,28 +369,36 @@ bool ACUVIM_II::BasicRead20ms(void)
  * None
  *
  **************************************************************************************************/
-void ACUVIM_II::BasicRequest20ms(void)
+bool ACUVIM_II::BasicRequest20ms(void)
 {
   SocketAddress addr;
   uint16_t data[] = {0x55, 0xAA};
+  bool rqstPass = false;
 
   addr.set_ip_address(SERVER_IP_ADDRESS);
   addr.set_port(MODBUS_DEFAULT_PORT);
 
-  
-
   if (true == (bool)modbusTCPClient.connected())
   {  
-      Serial.println("SENDING...");
     
-    if (!modbusTCPClient.requestFrom(HOLDING_REGISTERS, 
-                                    ACUVIM_MB_BASIC_20MS_ADDR, 
-                                    NOOF_BASIC_REGS_20MS)) 
+    //if (!modbusTCPClient.requestFrom(HOLDING_REGISTERS, 
+    //                                ACUVIM_MB_BASIC_20MS_ADDR, 
+    //                                NOOF_BASIC_REGS_20MS)) 
+    if (!modbusTCPClient.requestFrom(COILS, 
+                                    1, 
+                                    1)) 
     {
-      Serial.print("Failed to send Acuview read request: ");
-      Serial.println(modbusTCPClient.lastError());
+      //Serial.print("Failed to send Acuview read request: ");
+      //Serial.println(modbusTCPClient.lastError());
+    }
+    else
+    {
+      rqstPass = true;
+      Serial.print("READ OK");
     }
   }
+
+  return rqstPass;
 }
 
 /* End private functions */
@@ -544,9 +549,16 @@ bool ACUVIM_II::Control(acuvimBasicMeasurement20ms_t *measurements)
       /* Fall straight through to.... */
     case ACUVIM_READ_IDLE_DURING:
       digital_outputs.set(2, HIGH);
-      BasicRequest20ms();                     // initiate new read
+      result = BasicRequest20ms();                     // initiate new read
       digital_outputs.set(2, LOW);
-      readState = ACUVIM_READ_IN_PROGRESS_ENTRY;
+      if(true == result)
+      {
+        //shaun readState = ACUVIM_READ_IN_PROGRESS_ENTRY;
+      }
+      else
+      {
+        readState = ACUVIM_ETH_CONNECT_ENTRY;
+      }
       break;
 
     case ACUVIM_READ_IN_PROGRESS_ENTRY:

@@ -41,7 +41,7 @@ class ACUVIM_II
     bool InitTcpSocket(void);
     bool ConnectServer(void);
     bool ModbusClientInit(void);   
-    void BasicRequest20ms(void);
+    bool BasicRequest20ms(void);
     bool BasicRead20ms(void);
     bool CheckModbus(void);
 
